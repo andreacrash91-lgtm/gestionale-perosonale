@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestione Dipendenti</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        function GestioneDipendenti() {
+            const [currentView, setCurrentView] = useState('home');
+            const [selectedDipendente, setSelectedDipendente] = useState(null);
+            const [dipendenti, setDipendenti] = useState([]);
+            const [showForm, setShowForm] = useState(false);
+            const [editingId, setEditingId] = useState(null);
+            const [formData, setFormData] = useState({
+                nome: '',
+                cognome: '',
+                email: '',
+                telefono: '',
+                costoGiornaliero: '',
+                dataInizio: '',
+                bonusProduzione: 0,
+                ultimoPagamento: null
+            });
+            const [assenze, setAssenze] = useState({});
+            const [editingAssenza, setEditingAssenza] = useState({});
+            const [storicoAssenze, setStoricoAssenze] = useState({});
+
+            // Carica dati da LocalStorage all'avvio
+            useEffect(() => {
+                const dipendentiSalvati = localStorage.getItem('dipendenti');
+                const assenzeSalvate = localStorage.getItem('assenze');
+                const storicoSalvato = localStorage.getItem('storico');
+
+                if (dipendentiSalvati) {
+                    setDipendenti(JSON.parse(dipendentiSalvati));
+                }
+                if (assenzeSalvate) {
+                    setAssenze(JSON.parse(assenzeSalvate));
+                }
+                if (storicoSalvato) {
+                    setStoricoAssenze(JSON.parse(storicoSalvato));
+                }
+            }, []);
+
+            // Salva automaticamente quando cambiano i dati
+            useEffect(() => {
+                if (dipendenti.length > 0) {
+                    localStorage.setItem('dipendenti', JSON.stringify(dipendenti));
+                }
+            }, [dipendenti]);
+
+            useEffect(() => {
+                localStorage.setItem('assenze', JSON.stringify(assenze));
+            }, [assenze]);
+
+            useEffect(() => {
+                localStorage.setItem('storico', JSON.stringify(storicoAssenze));
+            }, [storicoAssenze]);
+
+            const calcolaPeriodoMensile = (dataInizio, ultimoPagamento = null) => {
+                const inizio = new Date(dataInizio);
+                const oggi = new Date();
+                
+                const giornoInizio = inizio.getDate();
+                
+                let inizioPeriodo;
+                
+                if (ultimoPagamento) {
+                    inizioPeriodo = new Date(ultimoPagamento);
+                    inizioPeriodo.setDate(inizioPeriodo.getDate() + 1);
+                } else {
+                    const meseCorrente = oggi.getMonth();
+                    const annoCorrente = oggi.getFullYear();
+                    
+                    inizioPeriodo = new Date(annoCorrente, meseCorrente, giornoInizio);
+                    
+                    if (inizioPeriodo > oggi) {
+                        inizioPeriodo = new Date(annoCorrente, meseCorrente - 1, giornoInizio);
+                    }
+                }
+                
+                const finePeriodo = new Date(inizioPeriodo);
+                finePeriodo.setMonth(finePeriodo.getMonth() + 1);
+                finePeriodo.setDate(finePeriodo.getDate() - 1);
+                
+                return { inizioPeriodo, finePeriodo };
+            };
+
+            const calcolaGiorniLavorativi = (dataInizio, dataFine, assenzeArray = []) => {
+                let giorni = 0;
+                let currentDate = new Date(dataInizio);
+                const endDate = new Date(dataFine);
+                
+                while (currentDate <= endDate) {
+                    const dayOfWeek = currentDate.getDay();
+                    const dateString = currentDate.toISOString().split('T')[0];
+                    
+                    const isAssente = assenzeArray.some(a => a.data === dateString);
+                    
+                    if (dayOfWeek !== 0 && dayOfWeek !== 6 && !isAssente) {
+                        giorni++;
+                    }
+                    currentDate.setDate(currentDate.getDate() + 1);
+                }
+                
+                return giorni;
+            };
+
+            const calcolaTotale = (dipendente) => {
+                const { inizioPeriodo, finePeriodo } = calcolaPeriodoMensile(dipendente.dataInizio, dipendente.ultimoPagamento);
+                const assenzeArray = assenze[dipendente.id] || [];
+                const giorniLavorativi = calcolaGiorniLavorativi(inizioPeriodo, finePeriodo, assenzeArray);
+                const totaleBase = giorniLavorativi * parseFloat(dipendente.costoGiornaliero);
+                const bonus = parseFloat(dipendente.bonusProduzione) || 0;
+                
+                return {
+                    inizioPeriodo,
+                    finePeriodo,
+                    giorniLavorativi,
+                    numeroAssenze: assenzeArray.length,
+                    totaleBase,
+                    bonus,
+                    totaleDaPagare: totaleBase + bonus
+                };
+            };
+
+            const aggiungiDipendente = () => {
+                if (!formData.nome || !formData.cognome || !formData.costoGiornaliero || !formData.dataInizio) {
+                    alert('Compila tutti i campi obbligatori');
+                    return;
+                }
+
+                if (editingId) {
+                    setDipendenti(dipendenti.map(d => 
+                        d.id === editingId ? { ...formData, id: editingId } : d
+                    ));
+                    setEditingId(null);
+                } else {
+                    const nuovoDipendente = {
+                        ...formData,
+                        id: Date.now(),
+                        bonusProduzione: parseFloat(formData.bonusProduzione) || 0,
+                        ultimoPagamento: null
+                    };
+                    setDipendenti([...dipendenti, nuovoDipendente]);
+                }
+
+                setFormData({
+                    nome: '',
+                    cognome: '',
+                    email: '',
+                    telefono: '',
+                    costoGiornaliero: '',
+                    dataInizio: '',
+                    bonusProduzione: 0,
+                    ultimoPagamento: null
+                });
+                setShowForm(false);
+            };
+
+            const modificaDipendente = (dipendente) => {
+                setFormData(dipendente);
+                setEditingId(dipendente.id);
+                setShowForm(true);
+            };
+
+            const eliminaDipendente = (id) => {
+                if (confirm('Sei sicuro di voler eliminare questo dipendente?')) {
+                    setDipendenti(dipendenti.filter(d => d.id !== id));
+                    const newAssenze = { ...assenze };
+                    delete newAssenze[id];
+                    setAssenze(newAssenze);
+                    const newStorico = { ...storicoAssenze };
+                    delete newStorico[id];
+                    setStoricoAssenze(newStorico);
+                }
+            };
+
+            const eliminaPeriodo = (dipendenteId, periodoIndex) => {
+                if (confirm('Sei sicuro di voler eliminare questo periodo pagato?')) {
+                    const nuovoStorico = { ...storicoAssenze };
+                    nuovoStorico[dipendenteId] = nuovoStorico[dipendenteId].filter((_, index) => index !== periodoIndex);
+                    setStoricoAssenze(nuovoStorico);
+                }
+            };
+
+            const aggiungiAssenza = (dipendenteId) => {
+                const data = editingAssenza[dipendenteId];
+                if (!data) {
+                    alert('Seleziona una data');
+                    return;
+                }
+
+                const nuoveAssenze = {
+                    ...assenze,
+                    [dipendenteId]: [...(assenze[dipendenteId] || []), { data, id: Date.now() }]
+                };
+                setAssenze(nuoveAssenze);
+                setEditingAssenza({ ...editingAssenza, [dipendenteId]: '' });
+            };
+
+            const rimuoviAssenza = (dipendenteId, assenzaId) => {
+                const nuoveAssenze = {
+                    ...assenze,
+                    [dipendenteId]: assenze[dipendenteId].filter(a => a.id !== assenzaId)
+                };
+                setAssenze(nuoveAssenze);
+            };
+
+            const aggiornaBonus = (dipendenteId, nuovoBonus) => {
+                setDipendenti(dipendenti.map(d => 
+                    d.id === dipendenteId ? { ...d, bonusProduzione: parseFloat(nuovoBonus) || 0 } : d
+                ));
+            };
+
+            const segnaMesePagato = (dipendenteId) => {
+                const dipendente = dipendenti.find(d => d.id === dipendenteId);
+                const calcolo = calcolaTotale(dipendente);
+                
+                if (confirm(`Confermi il pagamento di ${formatCurrency(calcolo.totaleDaPagare)} per il periodo ${formatDate(calcolo.inizioPeriodo)} - ${formatDate(calcolo.finePeriodo)}?`)) {
+                    const assenzeCorrente = assenze[dipendenteId] || [];
+                    const nuovoStorico = {
+                        ...storicoAssenze,
+                        [dipendenteId]: [
+                            ...(storicoAssenze[dipendenteId] || []),
+                            {
+                                periodo: `${formatDate(calcolo.inizioPeriodo)} - ${formatDate(calcolo.finePeriodo)}`,
+                                dataPagamento: new Date().toISOString(),
+                                totale: calcolo.totaleDaPagare,
+                                bonus: calcolo.bonus,
+                                giorniLavorativi: calcolo.giorniLavorativi,
+                                assenze: [...assenzeCorrente]
+                            }
+                        ]
+                    };
+                    setStoricoAssenze(nuovoStorico);
+                    
+                    setDipendenti(dipendenti.map(d => 
+                        d.id === dipendenteId 
+                            ? { ...d, ultimoPagamento: calcolo.finePeriodo.toISOString().split('T')[0], bonusProduzione: 0 } 
+                            : d
+                    ));
+                    
+                    const nuoveAssenze = { ...assenze };
+                    nuoveAssenze[dipendenteId] = [];
+                    setAssenze(nuoveAssenze);
+                    
+                    alert('Mese segnato come pagato! Il calcolo riparte dal periodo successivo.');
+                }
+            };
+
+            const apriDettaglio = (dipendente) => {
+                setSelectedDipendente(dipendente);
+                setCurrentView('dettaglio');
+            };
+
+            const formatDate = (date) => {
+                return new Date(date).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' });
+            };
+
+            const formatCurrency = (amount) => {
+                return new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(amount);
+            };
+
+            if (currentView === 'home') {
+                return (
+                    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+                        <div className="max-w-7xl mx-auto">
+                            <div className="bg-white rounded-lg shadow-xl p-6 mb-6">
+                                <div className="flex items-center justify-between mb-6">
+                                    <div className="flex items-center gap-3">
+                                        <svg className="w-8 h-8 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                                        </svg>
+                                        <div>
+                                            <h1 className="text-3xl font-bold text-gray-800">Home - Gestione Dipendenti</h1>
+                                            <p className="text-sm text-blue-600 flex items-center gap-1">
+                                                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                                </svg>
+                                                Salvataggio automatico attivo
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={() => {
+                                            setShowForm(!showForm);
+                                            setEditingId(null);
+                                            setFormData({
+                                                nome: '',
+                                                cognome: '',
+                                                email: '',
+                                                telefono: '',
+                                                costoGiornaliero: '',
+                                                dataInizio: '',
+                                                bonusProduzione: 0,
+                                                ultimoPagamento: null
+                                            });
+                                        }}
+                                        className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-lg font-semibold transition-colors"
+                                    >
+                                        {showForm ? 'Annulla' : '+ Nuovo Dipendente'}
+                                    </button>
+                                </div>
+
+                                {showForm && (
+                                    <div className="bg-gray-50 p-6 rounded-lg mb-6">
+                                        <h2 className="text-xl font-semibold mb-4 text-gray-700">
+                                            {editingId ? 'Modifica Dipendente' : 'Aggiungi Nuovo Dipendente'}
+                                        </h2>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <input
+                                                type="text"
+                                                placeholder="Nome *"
+                                                value={formData.nome}
+                                                onChange={(e) => setFormData({ ...formData, nome: e.target.value })}
+                                                className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                            />
+                                            <input
+                                                type="text"
+                                                placeholder="Cognome *"
+                                                value={formData.cognome}
+                                                onChange={(e) => setFormData({ ...formData, cognome: e.target.value })}
+                                                className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                            />
+                                            <input
+                                                type="email"
+                                                placeholder="Email"
+                                                value={formData.email}
+                                                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                                                className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                            />
+                                            <input
+                                                type="tel"
+                                                placeholder="Telefono"
+                                                value={formData.telefono}
+                                                onChange={(e) => setFormData({ ...formData, telefono: e.target.value })}
+                                                className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                            />
+                                            <input
+                                                type="number"
+                                                placeholder="Costo Giornaliero (€) *"
+                                                value={formData.costoGiornaliero}
+                                                onChange={(e) => setFormData({ ...formData, costoGiornaliero: e.target.value })}
+                                                className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                                step="0.01"
+                                            />
+                                            <input
+                                                type="date"
+                                                placeholder="Data Inizio Prestazione *"
+                                                value={formData.dataInizio}
+                                                onChange={(e) => setFormData({ ...formData, dataInizio: e.target.value })}
+                                                className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                            />
+                                        </div>
+                                        <button
+                                            onClick={aggiungiDipendente}
+                                            className="mt-4 bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg font-semibold transition-colors"
+                                        >
+                                            {editingId ? 'Salva Modifiche' : 'Aggiungi Dipendente'}
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+
+                            {dipendenti.length === 0 ? (
+                                <div className="bg-white rounded-lg shadow-xl p-12 text-center">
+                                    <svg className="w-16 h-16 text-gray-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                    </svg>
+                                    <p className="text-gray-500 text-lg">Nessun dipendente inserito. Aggiungi il primo dipendente per iniziare.</p>
+                                </div>
+                            ) : (
+                                <div className="grid gap-6">
+                                    {dipendenti.map(dipendente => {
+                                        const storico = storicoAssenze[dipendente.id] || [];
+                                        const totalePagato = storico.reduce((sum, record) => sum + record.totale, 0);
+                                        
+                                        return (
+                                            <div key={dipendente.id} className="bg-white rounded-lg shadow-xl overflow-hidden">
+                                                <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-6 text-white">
+                                                    <div className="flex justify-between items-start">
+                                                        <div>
+                                                            <h2 className="text-2xl font-bold mb-2">{dipendente.nome} {dipendente.cognome}</h2>
+                                                            <p className="text-indigo-100">{dipendente.email}</p>
+                                                            <p className="text-indigo-100">{dipendente.telefono}</p>
+                                                            <p className="text-indigo-100 mt-2">Costo Giornaliero: {formatCurrency(dipendente.costoGiornaliero)}</p>
+                                                        </div>
+                                                        <div className="flex gap-2">
+                                                            <button
+                                                                onClick={() => apriDettaglio(dipendente)}
+                                                                className="bg-white/20 hover:bg-white/30 p-3 rounded-lg transition-colors"
+                                                                title="Apri Dettaglio"
+                                                            >
+                                                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                                                </svg>
+                                                            </button>
+                                                            <button
+                                                                onClick={() => eliminaDipendente(dipendente.id)}
+                                                                className="bg-red-500/50 hover:bg-red-500/70 p-3 rounded-lg transition-colors"
+                                                                title="Elimina Dipendente"
+                                                            >
+                                                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                                </svg>
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    <div className="mt-4 pt-4 border-t border-white/20">
+                                                        <div className="flex justify-between items-center">
+                                                            <span className="text-lg">Totale Pagato Storico:</span>
+                                                            <span className="text-2xl font-bold">{formatCurrency(totalePagato)}</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="p-6">
+                                                    <h3 className="font-semibold text-lg mb-4 text-gray-700 flex items-center gap-2">
+                                                        <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                                                        </svg>
+                                                        Storico Periodi Pagati ({storico.length})
+                                                    </h3>
+
+                                                    {storico.length === 0 ? (
+                                                        <div className="text-center py-8 bg-gray-50 rounded-lg">
+                                                            <p className="text-gray-500">Nessun periodo pagato ancora</p>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="space-y-3">
+                                                            {storico.slice().reverse().map((record, index) => (
+                                                                <div key={index} className="bg-green-50 p-4 rounded-lg border-l-4 border-green-500 hover:bg-green-100 transition-colors">
+                                                                    <div className="flex justify-between items-start">
+                                                                        <div className="flex-1">
+                                                                            <div className="flex items-center gap-2 mb-2">
+                                                                                <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                                                </svg>
+                                                                                <p className="font-bold text-green-800 text-lg">{record.periodo}</p>
+                                                                            </div>
+                                                                            <p className="text-sm text-gray-600 ml-7">Pagato il: {formatDate(record.dataPagamento)}</p>
+                                                                            <p className="text-sm text-gray-600 ml-7">{record.giorniLavorativi} giorni lavorativi - {record.assenze.length} assenze</p>
+                                                                            {record.bonus > 0 && (
+                                                                                <p className="text-sm text-green-700 ml-7 font-semibold">+ Bonus: {formatCurrency(record.bonus)}</p>
+                                                                            )}
+                                                                        </div>
+                                                                        <div className="flex items-center gap-3">
+                                                                            <div className="text-right">
+                                                                                <p className="text-2xl font-bold text-green-700">{formatCurrency(record.totale)}</p>
+                                                                            </div>
+                                                                            <button
+                                                                                onClick={() => eliminaPeriodo(dipendente.id, storico.length - 1 - index)}
+                                                                                className="bg-red-500 hover:bg-red-600 text-white p-2 rounded-lg transition-colors"
+                                                                                title="Elimina Periodo"
+                                                                            >
+                                                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                                                </svg>
+                                                                            </button>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                );
+            }
+
+            // VISTA DETTAGLIO
+            const dipendente = selectedDipendente;
+            const dipendenteAggiornato = dipendenti.find(d => d.id === dipendente.id) || dipendente;
+            const calcolo = calcolaTotale(dipendenteAggiornato);
+            const storico = storicoAssenze[dipendente.id] || [];
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+                    <div className="max-w-7xl mx-auto">
+                        <div className="bg-white rounded-lg shadow-xl p-4 mb-6">
+                            <button
+                                onClick={() => setCurrentView('home')}
+                                className="flex items-center gap-2 text-indigo-600 hover:text-indigo-800 font-semibold"
+                            >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                                </svg>
+                                Torna alla Home
+                            </button>
+                        </div>
+
+                        <div className="bg-white rounded-lg shadow-xl overflow-hidden">
+                            <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-4 text-white">
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <h2 className="text-2xl font-bold">{dipendenteAggiornato.nome} {dipendenteAggiornato.cognome}</h2>
+                                        <p className="text-indigo-100">{dipendenteAggiornato.email}</p>
+                                        <p className="text-indigo-100">{dipendenteAggiornato.telefono}</p>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={() => {
+                                                modificaDipendente(dipendenteAggiornato);
+                                                setCurrentView('home');
+                                            }}
+                                            className="bg-white/20 hover:bg-white/30 p-2 rounded-lg transition-colors"
+                                        >
+                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="p-6">
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                                    <div className="bg-blue-50 p-4 rounded-lg">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                            </svg>
+                                            <span className="text-sm text-gray-600">Costo Giornaliero</span>
+                                        </div>
+                                        <p className="text-2xl font-bold text-blue-600">{formatCurrency(dipendenteAggiornato.costoGiornaliero)}</p>
+                                    </div>
+
+                                    <div className="bg-green-50 p-4 rounded-lg">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                            </svg>
+                                            <span className="text-sm text-gray-600">Data Inizio</span>
+                                        </div>
+                                        <p className="text-lg font-semibold text-green-600">{formatDate(dipendenteAggiornato.dataInizio)}</p>
+                                    </div>
+
+                                    <div className="bg-purple-50 p-4 rounded-lg">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                            </svg>
+                                            <span className="text-sm text-gray-600">Periodo Corrente</span>
+                                        </div>
+                                        <p className="text-sm font-semibold text-purple-600">
+                                            {formatDate(calcolo.inizioPeriodo)} - {formatDate(calcolo.finePeriodo)}
+                                        </p>
+                                    </div>
+
+                                    <div className="bg-orange-50 p-4 rounded-lg">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <svg className="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                                            </svg>
+                                            <span className="text-sm text-gray-600">Giorni Lavorativi</span>
+                                        </div>
+                                        <p className="text-2xl font-bold text-orange-600">{calcolo.giorniLavorativi}</p>
+                                        <p className="text-xs text-gray-500">{calcolo.numeroAssenze} assenze</p>
+                                    </div>
+                                </div>
+
+                                <div className="border-t pt-6">
+                                    <h3 className="font-semibold text-lg mb-4 text-gray-700">Gestione Assenze</h3>
+                                    <div className="flex gap-2 mb-4">
+                                        <input
+                                            type="date"
+                                            value={editingAssenza[dipendenteAggiornato.id] || ''}
+                                            onChange={(e) => setEditingAssenza({ ...editingAssenza, [dipendenteAggiornato.id]: e.target.value })}
+                                            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                        />
+                                        <button
+                                            onClick={() => aggiungiAssenza(dipendenteAggiornato.id)}
+                                            className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-lg font-semibold transition-colors"
+                                        >
+                                            Aggiungi Assenza
+                                        </button>
+                                    </div>
+
+                                    {assenze[dipendenteAggiornato.id] && assenze[dipendenteAggiornato.id].length > 0 && (
+                                        <div className="flex flex-wrap gap-2">
+                                            {assenze[dipendenteAggiornato.id].map(assenza => (
+                                                <div key={assenza.id} className="bg-red-100 text-red-700 px-3 py-1 rounded-full flex items-center gap-2">
+                                                    <span>{formatDate(assenza.data)}</span>
+                                                    <button
+                                                        onClick={() => rimuoviAssenza(dipendenteAggiornato.id, assenza.id)}
+                                                        className="hover:bg-red-200 rounded-full p-1"
+                                                    >
+                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                                        </svg>
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="border-t pt-6 mt-6">
+                                    <h3 className="font-semibold text-lg mb-4 text-gray-700">Calcolo Mensile</h3>
+                                    <div className="bg-gray-50 p-4 rounded-lg space-y-3">
+                                        <div className="flex justify-between">
+                                            <span className="text-gray-600">Totale Base ({calcolo.giorniLavorativi} giorni × {formatCurrency(dipendenteAggiornato.costoGiornaliero)})</span>
+                                            <span className="font-semibold">{formatCurrency(calcolo.totaleBase)}</span>
+                                        </div>
+                                        
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-gray-600">Bonus Produzione (€)</span>
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="number"
+                                                    value={dipendenteAggiornato.bonusProduzione}
+                                                    onChange={(e) => aggiornaBonus(dipendenteAggiornato.id, e.target.value)}
+                                                    className="w-32 px-3 py-1 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-right"
+                                                    step="0.01"
+                                                    placeholder="0.00"
+                                                />
+                                                <span className="font-semibold text-indigo-600">= {formatCurrency(calcolo.bonus)}</span>
+                                            </div>
+                                        </div>
+                                        
+                                        <div className="border-t pt-3 flex justify-between items-center">
+                                            <span className="text-lg font-bold text-gray-800">TOTALE DA PAGARE</span>
+                                            <span className="text-2xl font-bold text-green-600">{formatCurrency(calcolo.totaleDaPagare)}</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="mt-6">
+                                    <button
+                                        onClick={() => segnaMesePagato(dipendenteAggiornato.id)}
+                                        className={`w-full py-4 rounded-lg font-semibold transition-all duration-300 cursor-pointer
+                                            ${dipendenteAggiornato.ultimoPagamento && new Date(dipendenteAggiornato.ultimoPagamento) >= new Date(calcolo.inizioPeriodo)
+                                                ? 'bg-green-500 hover:bg-green-600 text-white'
+                                                : 'bg-red-500 hover:bg-red-600 text-white'
+                                            }`}
+                                    >
+                                        <div className="flex items-center justify-between px-6">
+                                            <div className="flex items-center gap-3">
+                                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                                </svg>
+                                                <div className="text-left">
+                                                    <div className="text-sm opacity-90">Periodo</div>
+                                                    <div className="text-lg font-bold">
+                                                        {formatDate(calcolo.inizioPeriodo)} → {formatDate(calcolo.finePeriodo)}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-3">
+                                                <div className="text-right">
+                                                    <div className="text-sm opacity-90">Totale</div>
+                                                    <div className="text-2xl font-bold">{formatCurrency(calcolo.totaleDaPagare)}</div>
+                                                </div>
+                                                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    {dipendenteAggiornato.ultimoPagamento && new Date(dipendenteAggiornato.ultimoPagamento) >= new Date(calcolo.inizioPeriodo) ? (
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                    ) : (
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                    )}
+                                                </svg>
+                                            </div>
+                                        </div>
+                                        <div className="text-center text-sm mt-2 opacity-90">
+                                            {dipendenteAggiornato.ultimoPagamento && new Date(dipendenteAggiornato.ultimoPagamento) >= new Date(calcolo.inizioPeriodo)
+                                                ? '✓ PERIODO PAGATO'
+                                                : '⚠ DA PAGARE - Clicca per segnare come pagato'
+                                            }
+                                        </div>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<GestioneDipendenti />, document.getElementById('root'));
+    </script>
+</body>
+</html>
